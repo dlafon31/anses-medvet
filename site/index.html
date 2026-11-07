@@ -125,6 +125,8 @@ const Refresher = (() => {
     if (m) return [+m[3], +m[2] - 1, +m[1], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0)];
     m = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/);
     if (m) return [+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0)];
+    m = s.match(/(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})(?:\D{1,4}(\d{1,2})[:hH](\d{2})(?::(\d{2}))?)?/);
+    if (m) return [+m[3], +m[2] - 1, +m[1], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0)];
     return undefined;
   }
 
@@ -208,7 +210,8 @@ const Refresher = (() => {
     });
     const colById = new Map();
     C.id.forEach((id, i) => colById.set(id, C.colId[i]));
-    C.id.forEach((id, i) => {
+    const order = C.id.map((_, i) => i).sort((a, b) => (C.parentPos ? C.parentPos[a] - C.parentPos[b] : 0) || a - b);
+    order.forEach((i) => {
       const t = byRef.get(C.parentId[i]);
       if (!t) return;
       const colId = C.colId[i];
@@ -270,9 +273,22 @@ const Refresher = (() => {
                  || dataCols.find((c) => !used.has(c.colId) && norm(c.colId) === n);
         if (col) { used.add(col.colId); mapping.push({ idx, col }); } else unmatchedHeaders.push(String(h));
       });
+      // Aucun en-tête reconnu : l'onglet n'a pas de ligne d'en-tête (ex. « Date export »).
+      // La 1re ligne est alors une ligne de données, associée aux colonnes Grist par position.
+      let headerless = false;
+      if (!mapping.length && hIdx >= 0) {
+        headerless = true;
+        unmatchedHeaders.length = 0;
+        const width = Math.max(...aoa.slice(hIdx).map((r) => r.length));
+        for (let idx = 0; idx < Math.min(width, dataCols.length); idx++) {
+          // On ne prend que les colonnes qui contiennent au moins une valeur
+          if (aoa.slice(hIdx).some((r) => !isBlank(r[idx]))) { mapping.push({ idx, col: dataCols[idx] }); used.add(dataCols[idx].colId); }
+        }
+      }
       const unmappedCols = dataCols.filter((c) => !used.has(c.colId)).map((c) => c.colId);
-      const rows = hIdx >= 0 ? aoa.slice(hIdx + 1).filter((r) => r && r.some((c) => !isBlank(c))) : [];
-      plans.push({ sheetName, tableId, mapping, unmatchedHeaders, unmappedCols, rows });
+      const first = headerless ? hIdx : hIdx + 1;
+      const rows = hIdx >= 0 ? aoa.slice(first).filter((r) => r && r.some((c) => !isBlank(c))) : [];
+      plans.push({ sheetName, tableId, mapping, unmatchedHeaders, unmappedCols, rows, headerless });
     }
     return { plans, ignoredSheets };
   }
@@ -380,6 +396,7 @@ const Refresher = (() => {
         mode: '', badRefs: 0, badDates: 0, unmatchedHeaders: plan.unmatchedHeaders, unmappedCols: plan.unmappedCols, skipped: false };
       progress({ step, total: ordered.length, tableId, phase: 'analyse' });
       log(`— ${tableId} : ${plan.rows.length} lignes dans l'onglet « ${plan.sheetName} »`);
+      if (plan.headerless) log(`  Onglet sans ligne d'en-tête : colonnes associées par position (${mapping.map((m) => m.col.colId).join(', ')})`);
       if (plan.unmatchedHeaders.length) log(`  Colonnes Excel sans équivalent dans Grist : ${plan.unmatchedHeaders.join(', ')}`, 'warn');
       if (plan.unmappedCols.length) log(`  Colonnes Grist absentes de l'Excel : ${plan.unmappedCols.join(', ')}`, 'warn');
       if (!mapping.length) { log('  Aucune colonne commune, table ignorée.', 'error'); r.skipped = true; report.tables.push(r); continue; }
