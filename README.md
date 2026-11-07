@@ -28,3 +28,13 @@ télécharger le fichier directement. Ce dépôt contourne le problème :
 `Medicaments` est mise à jour par `Num_Ident` (identifiants de ligne stables) ; les autres tables
 sont remplacées uniquement si leur contenu a changé. Le bouton *Importer un fichier Excel…* reste
 disponible si la copie est indisponible.
+
+## Tables de paramétrage dans le document Grist
+
+- **Admin** (colonnes `Table`, `Onglet`) : onglet du fichier qui alimente chaque table.
+- **Admin_Colonnes** (colonnes `Table`, `Colonne`, `Entete`) : en-têtes Excel qui diffèrent du
+  libellé de la colonne Grist (ex. `Medicaments.Num_Ident` ← « N° d'identification »).
+
+Garde-fou : une table n'est jamais réécrite si sa colonne clé (utilisée par les références) ou
+l'une de ses colonnes de référence n'est pas trouvée dans l'onglet.
+L'inventaire des onglets et en-têtes du fichier est publié dans `data/inventaire.json`.

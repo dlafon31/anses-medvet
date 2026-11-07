@@ -33,7 +33,7 @@
   th { background: var(--fond-2); font-weight: 600; }
   td.n { text-align: right; font-variant-numeric: tabular-nums; }
   .tag { display: inline-block; padding: 0 6px; border-radius: 3px; font-size: 12px; background: var(--fond-2); }
-  .tag.ok { background: #b8fec9; color: var(--ok); } .tag.chg { background: var(--bleu-clair); color: var(--bleu); }
+  .tag.ok { background: #b8fec9; color: var(--ok); } .tag.err { background: #ffe9e9; color: var(--err); } .tag.chg { background: var(--bleu-clair); color: var(--bleu); }
   #log { max-height: 260px; overflow: auto; background: var(--fond-2); border-radius: 4px; padding: 8px 10px; font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; margin: 0; }
   .warn { color: var(--warn); } .error { color: var(--err); } .okc { color: var(--ok); }
   .hidden { display: none; }
@@ -247,7 +247,26 @@ const Refresher = (() => {
     return map;
   }
 
-  function analyseWorkbook(workbook, XLSX, tables, sheetMap = new Map()) {
+  // Correspondance en-tête Excel -> colonne Grist lue dans la table Admin_Colonnes
+  // (colonnes Table, Colonne, Entete). Renvoie Map(tableId -> Map(norm(entête) -> colId)).
+  async function readColumnAliases(docApi, tables, log = () => {}) {
+    const out = new Map();
+    let a;
+    try { a = await docApi.fetchTable('Admin_Colonnes'); } catch (e) { return out; }
+    if (!a || !a.Table || !a.Colonne || !a.Entete) return out;
+    const byNorm = new Map(Object.keys(tables).map((t) => [norm(t), t]));
+    a.Table.forEach((t, i) => {
+      if (isBlank(t) || isBlank(a.Colonne[i]) || isBlank(a.Entete[i])) return;
+      const tableId = byNorm.get(norm(t));
+      const col = tableId && tables[tableId].columns.find((c) => norm(c.colId) === norm(a.Colonne[i]) || norm(c.label) === norm(a.Colonne[i]));
+      if (!col) { log(`Admin_Colonnes : colonne « ${String(t).trim()}.${String(a.Colonne[i]).trim()} » introuvable (ligne ignorée)`, 'warn'); return; }
+      if (!out.has(tableId)) out.set(tableId, new Map());
+      out.get(tableId).set(norm(a.Entete[i]), col.colId);
+    });
+    return out;
+  }
+
+  function analyseWorkbook(workbook, XLSX, tables, sheetMap = new Map(), colAliases = new Map()) {
     const byNorm = new Map(Object.keys(tables).map((t) => [norm(t), t]));
     const plans = [];
     const ignoredSheets = [];
@@ -269,7 +288,9 @@ const Refresher = (() => {
       header.forEach((h, idx) => {
         if (isBlank(h)) return;
         const n = norm(h);
-        const col = dataCols.find((c) => !used.has(c.colId) && norm(c.label) === n)
+        const alias = colAliases.get(tableId) && colAliases.get(tableId).get(n);
+        const col = (alias && dataCols.find((c) => !used.has(c.colId) && c.colId === alias))
+                 || dataCols.find((c) => !used.has(c.colId) && norm(c.label) === n)
                  || dataCols.find((c) => !used.has(c.colId) && norm(c.colId) === n);
         if (col) { used.add(col.colId); mapping.push({ idx, col }); } else unmatchedHeaders.push(String(h));
       });
@@ -361,7 +382,9 @@ const Refresher = (() => {
       const missing = [...sheetMap.entries()].filter(([o]) => !sheets.has(o)).map(([, t]) => t);
       if (missing.length) log(`Onglets déclarés dans Admin mais absents du fichier, tables non actualisées : ${missing.join(', ')}`, 'warn');
     }
-    const { plans, ignoredSheets } = analyseWorkbook(workbook, XLSX, tables, sheetMap);
+    const colAliases = await readColumnAliases(docApi, tables, log);
+    if (colAliases.size) log(`Correspondances de colonnes lues dans Admin_Colonnes : ${[...colAliases.values()].reduce((n, m) => n + m.size, 0)}`);
+    const { plans, ignoredSheets } = analyseWorkbook(workbook, XLSX, tables, sheetMap, colAliases);
     const ordered = orderPlans(plans);
     const report = { dryRun, tables: [], ignoredSheets, untouchedTables: [] };
 
@@ -401,6 +424,23 @@ const Refresher = (() => {
       if (plan.unmappedCols.length) log(`  Colonnes Grist absentes de l'Excel : ${plan.unmappedCols.join(', ')}`, 'warn');
       if (!mapping.length) { log('  Aucune colonne commune, table ignorée.', 'error'); r.skipped = true; report.tables.push(r); continue; }
 
+      const parentKey = keyColumnFor(tableId, tables);
+      if (parentKey && tables[tableId].columns.some((c) => c.colId === parentKey && c.isData)
+          && !mapping.some((m) => m.col.colId === parentKey)) {
+        log(`  ARRÊT : la colonne clé « ${parentKey} » (utilisée par les références) n'a pas été trouvée dans l'onglet. `
+          + `Table non modifiée. Déclarez l'en-tête correspondant dans Admin_Colonnes.`, 'error');
+        r.mode = `ignorée : clé ${parentKey} absente`; r.skipped = true; r.blocked = true;
+        report.tables.push(r); continue;
+      }
+      const missingRefs = tables[tableId].columns
+        .filter((c) => c.isData && c.type.startsWith('Ref:') && !mapping.some((m) => m.col.colId === c.colId))
+        .map((c) => c.colId);
+      if (missingRefs.length) {
+        log(`  ARRÊT : colonne(s) de référence ${missingRefs.join(', ')} introuvable(s) dans l'onglet. `
+          + `Table non modifiée. Déclarez l'en-tête correspondant dans Admin_Colonnes.`, 'error');
+        r.mode = `ignorée : ${missingRefs.join(', ')} absente(s)`; r.skipped = true; r.blocked = true;
+        report.tables.push(r); continue;
+      }
       const refMaps = await buildRefMaps(plan);
       const stats = { badRefs: 0, badDates: 0 };
       const colIds = mapping.map((m) => m.col.colId);
@@ -479,7 +519,7 @@ const Refresher = (() => {
     return report;
   }
 
-  return { refresh, readSchema, readSheetMap, analyseWorkbook, orderPlans, convert, norm, keyOf, dateParts };
+  return { refresh, readSchema, readSheetMap, readColumnAliases, analyseWorkbook, orderPlans, convert, norm, keyOf, dateParts };
 })();
 if (typeof module !== 'undefined') module.exports = Refresher;
 
@@ -591,7 +631,7 @@ if (typeof module !== 'undefined') module.exports = Refresher;
       if (t.unmappedCols.length) alerts.push(`absentes de l'Excel : ${t.unmappedCols.join(', ')}`);
       const changed = t.added || t.updated || t.removed;
       const tr = document.createElement('tr');
-      tr.innerHTML = `<td><b></b></td><td><span class="tag ${changed ? 'chg' : 'ok'}"></span></td>
+      tr.innerHTML = `<td><b></b></td><td><span class="tag ${t.blocked ? 'err' : changed ? 'chg' : 'ok'}"></span></td>
         <td class="n">${t.rowsExcel.toLocaleString('fr-FR')}</td><td class="n">${t.added.toLocaleString('fr-FR')}</td>
         <td class="n">${t.updated.toLocaleString('fr-FR')}</td><td class="n">${t.removed.toLocaleString('fr-FR')}</td><td class="warn"></td>`;
       tr.querySelector('b').textContent = t.tableId;
