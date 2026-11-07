@@ -1,0 +1,72 @@
+name: Miroir du fichier ANSES
+
+on:
+  schedule:
+    - cron: '17 3 * * *'   # chaque nuit vers 4 h–5 h (heure de Paris)
+  workflow_dispatch:        # lancement manuel depuis l'onglet Actions
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  SOURCE_URL: https://www.data.gouv.fr/api/1/datasets/r/7a6e415d-1627-4051-963f-4d572ec27e5c
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Télécharger le fichier des médicaments vétérinaires
+        run: |
+          mkdir -p site/data
+          curl -fsSL --retry 3 --retry-delay 20 -D headers.txt \
+               -o site/data/amm-vet-fr.xls "$SOURCE_URL"
+          python3 - <<'PY'
+          import hashlib, json, os, re
+          from datetime import datetime, timezone
+          from email.utils import parsedate_to_datetime
+          path = 'site/data/amm-vet-fr.xls'
+          data = open(path, 'rb').read()
+          # Contrôle minimal : signature OLE2 (.xls) ou ZIP (.xlsx)
+          if not (data[:8] == bytes.fromhex('d0cf11e0a1b11ae1') or data[:2] == b'PK'):
+              raise SystemExit('Le fichier téléchargé n\'est pas un classeur Excel')
+          lm = None
+          for line in open('headers.txt', encoding='latin-1'):
+              m = re.match(r'(?i)last-modified:\s*(.+)', line.strip())
+              if m:
+                  try: lm = parsedate_to_datetime(m.group(1)).isoformat()
+                  except Exception: pass
+          meta = {
+              'source': os.environ['SOURCE_URL'],
+              'fetched_at': datetime.now(timezone.utc).isoformat(),
+              'source_last_modified': lm,
+              'size': len(data),
+              'sha256': hashlib.sha256(data).hexdigest(),
+          }
+          json.dump(meta, open('site/data/meta.json', 'w'), indent=2)
+          print(meta)
+          PY
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
