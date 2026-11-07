@@ -42,9 +42,9 @@
       const s = Math.floor((Date.now() - loaderStart) / 1000);
       $('loaderTime').textContent = s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, '0')} s`;
     }, 1000);
-    $('loader').classList.remove('hidden');
+    $('loadingSpinner').style.display = 'flex';
   }
-  function hideLoader() { clearInterval(loaderTimer); $('loader').classList.add('hidden'); }
+  function hideLoader() { clearInterval(loaderTimer); $('loadingSpinner').style.display = 'none'; }
   // Laisse le navigateur afficher le préchargeur avant un traitement lourd
   const paint = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
 
