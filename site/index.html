@@ -45,7 +45,7 @@
 <body>
 <main>
   <h1>Actualisation de la base des médicaments vétérinaires</h1>
-  <p class="sub">Télécharge le fichier Excel de l'ANSES et met à jour chaque table dont le nom correspond à un onglet.</p>
+  <p class="sub">Télécharge le fichier Excel de l'ANSES et met à jour chaque table associée à un onglet (correspondances de la table Admin, sinon même nom).</p>
 
   <div id="banner" class="banner hidden"></div>
 
@@ -227,12 +227,33 @@ const Refresher = (() => {
   }
 
   // ---------- Analyse du classeur ----------
-  function analyseWorkbook(workbook, XLSX, tables) {
+  // Correspondance onglet -> table lue dans la table Admin (colonnes Table et Onglet)
+  async function readSheetMap(docApi, tables, log = () => {}) {
+    const map = new Map(); // norm(onglet) -> tableId
+    let admin;
+    try { admin = await docApi.fetchTable('Admin'); } catch (e) { return map; }
+    if (!admin || !admin.Table || !admin.Onglet) return map;
+    const byNorm = new Map(Object.keys(tables).map((t) => [norm(t), t]));
+    admin.Table.forEach((t, i) => {
+      const onglet = admin.Onglet[i];
+      if (isBlank(t) || isBlank(onglet)) return;
+      const tableId = byNorm.get(norm(t));
+      if (!tableId) { log(`Admin : table « ${String(t).trim()} » introuvable dans le document (ligne ignorée)`, 'warn'); return; }
+      map.set(norm(onglet), tableId);
+    });
+    return map;
+  }
+
+  function analyseWorkbook(workbook, XLSX, tables, sheetMap = new Map()) {
     const byNorm = new Map(Object.keys(tables).map((t) => [norm(t), t]));
     const plans = [];
     const ignoredSheets = [];
+    const taken = new Set();
     for (const sheetName of workbook.SheetNames) {
-      const tableId = byNorm.get(norm(sheetName));
+      // 1) correspondance déclarée dans Admin, 2) à défaut, même nom que la table
+      let tableId = sheetMap.get(norm(sheetName)) || byNorm.get(norm(sheetName));
+      if (tableId && taken.has(tableId)) tableId = null; // une seule source par table
+      if (tableId) taken.add(tableId);
       if (!tableId) { ignoredSheets.push(sheetName); continue; }
       const ws = workbook.Sheets[sheetName];
       const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, blankrows: false });
@@ -317,7 +338,14 @@ const Refresher = (() => {
   // ---------- Actualisation ----------
   async function refresh({ docApi, XLSX, workbook, dryRun = false, log = () => {}, progress = () => {} }) {
     const tables = await readSchema(docApi);
-    const { plans, ignoredSheets } = analyseWorkbook(workbook, XLSX, tables);
+    const sheetMap = await readSheetMap(docApi, tables, log);
+    if (sheetMap.size) {
+      log(`Correspondances onglet → table lues dans Admin : ${sheetMap.size}`);
+      const sheets = new Set(workbook.SheetNames.map(norm));
+      const missing = [...sheetMap.entries()].filter(([o]) => !sheets.has(o)).map(([, t]) => t);
+      if (missing.length) log(`Onglets déclarés dans Admin mais absents du fichier, tables non actualisées : ${missing.join(', ')}`, 'warn');
+    }
+    const { plans, ignoredSheets } = analyseWorkbook(workbook, XLSX, tables, sheetMap);
     const ordered = orderPlans(plans);
     const report = { dryRun, tables: [], ignoredSheets, untouchedTables: [] };
 
@@ -434,7 +462,7 @@ const Refresher = (() => {
     return report;
   }
 
-  return { refresh, readSchema, analyseWorkbook, orderPlans, convert, norm, keyOf, dateParts };
+  return { refresh, readSchema, readSheetMap, analyseWorkbook, orderPlans, convert, norm, keyOf, dateParts };
 })();
 if (typeof module !== 'undefined') module.exports = Refresher;
 
@@ -446,6 +474,7 @@ if (typeof module !== 'undefined') module.exports = Refresher;
   const DATAGOUV_URL = 'https://www.data.gouv.fr/api/1/datasets/r/7a6e415d-1627-4051-963f-4d572ec27e5c';
   const DEFAULT_URL = 'https://dlafon31.github.io/anses-medvet/data/amm-vet-fr.xls';
   const $ = (id) => document.getElementById(id);
+  const norm = Refresher.norm;
   let workbook = null; let sourceLabel = ''; let busy = false;
 
   const fmtDate = (d) => d ? new Date(d).toLocaleString('fr-FR', { dateStyle: 'long', timeStyle: 'short' }) : '—';
@@ -549,6 +578,7 @@ if (typeof module !== 'undefined') module.exports = Refresher;
         <td class="n">${t.rowsExcel.toLocaleString('fr-FR')}</td><td class="n">${t.added.toLocaleString('fr-FR')}</td>
         <td class="n">${t.updated.toLocaleString('fr-FR')}</td><td class="n">${t.removed.toLocaleString('fr-FR')}</td><td class="warn"></td>`;
       tr.querySelector('b').textContent = t.tableId;
+      if (norm(t.sheet) !== norm(t.tableId)) tr.firstElementChild.append(document.createTextNode(` ← « ${t.sheet} »`));
       tr.querySelector('.tag').textContent = t.mode;
       tr.lastElementChild.textContent = alerts.join(' · ');
       tb.appendChild(tr);
