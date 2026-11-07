@@ -56,6 +56,32 @@ jobs:
           print(meta)
           PY
 
+      - name: Inventaire des onglets et en-têtes (journal)
+        run: |
+          pip install --quiet xlrd==2.0.1 openpyxl
+          python3 - <<'PY'
+          import json
+          path = 'site/data/amm-vet-fr.xls'
+          head = open(path, 'rb').read(8)
+          inv = {}
+          if head[:2] == b'PK':
+              import openpyxl
+              wb = openpyxl.load_workbook(path, read_only=True)
+              for ws in wb.worksheets:
+                  rows = [list(r) for _, r in zip(range(3), ws.iter_rows(values_only=True))]
+                  inv[ws.title] = {'lignes': ws.max_row, 'apercu': rows}
+          else:
+              import xlrd
+              wb = xlrd.open_workbook(path)
+              for sh in wb.sheets():
+                  inv[sh.name] = {'lignes': sh.nrows, 'apercu': [sh.row_values(i) for i in range(min(3, sh.nrows))]}
+          for name, v in inv.items():
+              print(f"== {name!r} : {v['lignes']} lignes")
+              for r in v['apercu']:
+                  print('   ', [str(c)[:40] for c in r])
+          json.dump(inv, open('site/data/inventaire.json', 'w'), ensure_ascii=False, indent=1, default=str)
+          PY
+
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
