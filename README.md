@@ -5,8 +5,17 @@ télécharger le fichier directement. Ce dépôt contourne le problème :
 
 1. **GitHub Actions** télécharge chaque nuit le fichier publié sur data.gouv.fr
    (`amm-vet-fr-v2.xls`) et le publie sur **GitHub Pages**, qui autorise les requêtes CORS.
-2. Le **widget** (`site/index.html`), publié sur le même site, lit cette copie et met à jour
-   les tables du document Grist.
+2. Le **widget**, publié sur le même site, lit cette copie et met à jour les tables du document Grist.
+
+## Organisation du code
+
+| Fichier | Rôle |
+|---|---|
+| `site/index.html` | Page du widget : structure et styles |
+| `site/js/widget.js` | Interface : téléchargement, analyse, application, journal |
+| `site/js/refresher.js` | Moteur (sans DOM) : correspondances onglets/colonnes, conversions, écriture par lots |
+| `tests/*.test.js` | Tests du moteur avec une fausse API Grist (`npm install && npm test`) |
+| `.github/workflows/miroir-anses.yml` | Copie nocturne du fichier ANSES et publication sur GitHub Pages |
 
 | Ressource | URL |
 |---|---|

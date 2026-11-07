@@ -1,0 +1,11 @@
+{
+  "name": "anses-medvet",
+  "private": true,
+  "description": "Widget Grist d'actualisation de la base des médicaments vétérinaires ANSES",
+  "scripts": {
+    "test": "for f in tests/*.test.js; do TZ=Europe/Paris node \"$f\" | tail -1 || exit 1; done"
+  },
+  "devDependencies": {
+    "xlsx": "0.18.5"
+  }
+}
