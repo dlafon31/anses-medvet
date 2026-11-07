@@ -36,6 +36,17 @@
   .tag.ok { background: #b8fec9; color: var(--ok); } .tag.err { background: #ffe9e9; color: var(--err); } .tag.chg { background: var(--bleu-clair); color: var(--bleu); }
   #log { max-height: 260px; overflow: auto; background: var(--fond-2); border-radius: 4px; padding: 8px 10px; font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; margin: 0; }
   .warn { color: var(--warn); } .error { color: var(--err); } .okc { color: var(--ok); }
+  .loader { position: fixed; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center;
+    background: rgba(255,255,255,.82); backdrop-filter: blur(1px); }
+  .loader-box { text-align: center; padding: 24px 28px; border: 1px solid var(--bord); border-radius: 8px;
+    background: var(--fond); box-shadow: 0 6px 24px rgba(0,0,0,.08); max-width: min(420px, calc(100vw - 32px)); }
+  .spinner { width: 44px; height: 44px; margin: 0 auto 14px; border-radius: 50%;
+    border: 4px solid var(--bleu-clair); border-top-color: var(--bleu); animation: spin .9s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 3s; } }
+  #loaderTitle { font-weight: 600; margin-bottom: 4px; }
+  #loaderText { color: var(--gris); min-height: 2.9em; }
+  #loaderTime { font-variant-numeric: tabular-nums; color: var(--gris); font-size: 12px; margin-top: 6px; }
   .hidden { display: none; }
   .banner { padding: 8px 12px; border-radius: 4px; margin-bottom: 12px; }
   .banner.info { background: var(--bleu-clair); } .banner.error { background: #ffe9e9; color: var(--err); }
@@ -43,6 +54,14 @@
 </style>
 </head>
 <body>
+<div id="loader" class="loader hidden" role="status" aria-live="polite">
+  <div class="loader-box">
+    <div class="spinner" aria-hidden="true"></div>
+    <div id="loaderTitle">Traitement en cours</div>
+    <div id="loaderText">Préparation…</div>
+    <div id="loaderTime">0 s</div>
+  </div>
+</div>
 <main>
   <h1>Actualisation de la base des médicaments vétérinaires</h1>
   <p class="sub">Télécharge le fichier Excel de l'ANSES et met à jour chaque table associée à un onglet (correspondances de la table Admin, sinon même nom).</p>

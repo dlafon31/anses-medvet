@@ -13,6 +13,7 @@ télécharger le fichier directement. Ce dépôt contourne le problème :
 |---|---|
 | `site/index.html` | Page du widget : structure et styles |
 | `site/js/widget.js` | Interface : téléchargement, analyse, application, journal |
+| `site/js/xlsx-worker.js` | Lecture du classeur hors du fil principal (préchargeur animé, page réactive) |
 | `site/js/refresher.js` | Moteur (sans DOM) : correspondances onglets/colonnes, conversions, écriture par lots |
 | `tests/*.test.js` | Tests du moteur avec une fausse API Grist (`npm install && npm test`) |
 | `.github/workflows/miroir-anses.yml` | Copie nocturne du fichier ANSES et publication sur GitHub Pages |

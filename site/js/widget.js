@@ -28,12 +28,31 @@
   }
   function setProgress(ratio, text) {
     $('bar').style.width = Math.round(Math.max(0, Math.min(1, ratio)) * 100) + '%';
-    if (text !== undefined) $('phase').textContent = text;
+    if (text !== undefined) { $('phase').textContent = text; if (text) $('loaderText').textContent = text; }
   }
-  function setBusy(b) {
+
+  // ---------- Préchargeur ----------
+  let loaderTimer = null; let loaderStart = 0;
+  function showLoader(title) {
+    $('loaderTitle').textContent = title;
+    $('loaderText').textContent = 'Préparation…';
+    loaderStart = Date.now(); $('loaderTime').textContent = '0 s';
+    clearInterval(loaderTimer);
+    loaderTimer = setInterval(() => {
+      const s = Math.floor((Date.now() - loaderStart) / 1000);
+      $('loaderTime').textContent = s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, '0')} s`;
+    }, 1000);
+    $('loader').classList.remove('hidden');
+  }
+  function hideLoader() { clearInterval(loaderTimer); $('loader').classList.add('hidden'); }
+  // Laisse le navigateur afficher le préchargeur avant un traitement lourd
+  const paint = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+
+  function setBusy(b, title) {
     busy = b;
     $('btnAnalyse').disabled = b; $('file').disabled = b;
     $('btnApply').disabled = b || !workbook;
+    if (b) showLoader(title || 'Traitement en cours'); else hideLoader();
   }
 
   // ---------- Paramètres ----------
@@ -93,9 +112,32 @@
     return out;
   }
 
-  function parse(bytes) {
-    setProgress(1, 'Lecture du classeur Excel…');
-    return XLSX.read(bytes, { type: 'array', cellDates: false });
+  // Lecture dans un Web Worker ; repli sur le fil principal si le worker est indisponible
+  function parseInWorker(bytes) {
+    return new Promise((resolve, reject) => {
+      let w;
+      try { w = new Worker(new URL('js/xlsx-worker.js', document.baseURI)); } catch (e) { reject(e); return; }
+      w.onmessage = (e) => {
+        const m = e.data;
+        if (m.type === 'step') setProgress(m.ratio ?? 1, m.text);
+        else if (m.type === 'done') { w.terminate(); resolve({ SheetNames: m.SheetNames, aoa: m.aoa }); }
+        else if (m.type === 'error') { w.terminate(); reject(Object.assign(new Error(m.message), { fromWorker: true })); }
+      };
+      w.onerror = (e) => { w.terminate(); reject(new Error(e.message || 'worker indisponible')); };
+      const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+      w.postMessage(buf, [buf]);
+    });
+  }
+
+  async function parse(bytes) {
+    setProgress(0, 'Lecture du classeur Excel…');
+    await paint();
+    try { return await parseInWorker(bytes.slice()); } catch (e) {
+      if (e.fromWorker) throw e; // fichier illisible : inutile de réessayer
+      setProgress(1, 'Lecture du classeur Excel (la page peut sembler figée)…');
+      await paint();
+      return XLSX.read(bytes, { type: 'array', cellDates: false });
+    }
   }
 
   // ---------- Exécution ----------
@@ -144,10 +186,10 @@
 
   async function analyse(loader) {
     if (busy) return;
-    setBusy(true); banner(''); workbook = null;
+    setBusy(true, 'Analyse du fichier ANSES'); banner(''); workbook = null;
     try {
       const { bytes, label } = await loader();
-      workbook = parse(bytes); sourceLabel = label;
+      workbook = await parse(bytes); sourceLabel = label;
       log(`Classeur chargé (${label}) : onglets ${workbook.SheetNames.join(', ')}`);
       log('Analyse des différences (aucune écriture)…');
       const rep = await run(true);
@@ -178,7 +220,7 @@
 
   $('btnApply').addEventListener('click', async () => {
     if (busy || !workbook) return;
-    setBusy(true); banner('');
+    setBusy(true, 'Mise à jour du document'); banner('');
     const t0 = Date.now();
     try {
       log(`Application des modifications (${sourceLabel})…`);

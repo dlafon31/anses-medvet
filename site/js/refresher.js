@@ -196,8 +196,9 @@ const Refresher = (() => {
       if (tableId && taken.has(tableId)) tableId = null; // une seule source par table
       if (tableId) taken.add(tableId);
       if (!tableId) { ignoredSheets.push(sheetName); continue; }
-      const ws = workbook.Sheets[sheetName];
-      const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, blankrows: false });
+      // Classeur pré-converti par le Web Worker (workbook.aoa) ou classeur SheetJS classique
+      const aoa = workbook.aoa ? workbook.aoa[sheetName]
+        : XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, raw: true, defval: null, blankrows: false });
       const hIdx = aoa.findIndex((r) => r && r.some((c) => !isBlank(c)));
       const header = hIdx >= 0 ? aoa[hIdx] : [];
       const dataCols = tables[tableId].columns.filter((c) => c.isData);
