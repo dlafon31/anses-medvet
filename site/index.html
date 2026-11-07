@@ -444,9 +444,7 @@ if (typeof module !== 'undefined') module.exports = Refresher;
   'use strict';
   // Copie publiée chaque nuit par GitHub Actions (le serveur de l'ANSES n'autorise pas les requêtes CORS)
   const DATAGOUV_URL = 'https://www.data.gouv.fr/api/1/datasets/r/7a6e415d-1627-4051-963f-4d572ec27e5c';
-  const DEFAULT_URL = location.hostname.endsWith('github.io')
-    ? new URL('data/amm-vet-fr.xls', location.href).href
-    : 'https://dlafon31.github.io/anses-medvet/data/amm-vet-fr.xls';
+  const DEFAULT_URL = 'https://dlafon31.github.io/anses-medvet/data/amm-vet-fr.xls';
   const $ = (id) => document.getElementById(id);
   let workbook = null; let sourceLabel = ''; let busy = false;
 
@@ -476,7 +474,7 @@ if (typeof module !== 'undefined') module.exports = Refresher;
 
   // ---------- Paramètres ----------
   grist.ready({ requiredAccess: 'full', allowSelectBy: false });
-  grist.onOptions((opts) => { if (opts && opts.sourceUrl) $('url').value = opts.sourceUrl; refreshInfo(); });
+  grist.onOptions((opts) => { if (opts && opts.sourceUrl && !/data\.gouv\.fr|anses\.fr/.test(opts.sourceUrl)) $('url').value = opts.sourceUrl; refreshInfo(); });
   $('url').value = DEFAULT_URL;
   refreshInfo();
   $('url').addEventListener('change', async () => {
@@ -516,7 +514,7 @@ if (typeof module !== 'undefined') module.exports = Refresher;
   async function download(url) {
     setProgress(0, 'Téléchargement du fichier…');
     const resp = await fetch(url, { redirect: 'follow', cache: 'no-store' });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status} sur ${url}`);
     const total = +resp.headers.get('content-length') || 0;
     if (!resp.body || !total) return new Uint8Array(await resp.arrayBuffer());
     const reader = resp.body.getReader(); const chunks = []; let got = 0;
